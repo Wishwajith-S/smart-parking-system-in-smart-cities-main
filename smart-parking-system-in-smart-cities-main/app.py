@@ -1,0 +1,136 @@
+"""
+Smart City Parking System - Main Application
+A peer-to-peer parking marketplace for smart cities
+"""
+
+from flask import Flask, jsonify, request, render_template
+from flask_cors import CORS
+from flask_jwt_extended import JWTManager
+from pymongo import MongoClient
+from datetime import datetime
+import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
+# Import configurations
+from config import Config
+
+# Import blueprints
+from routes.auth import auth_bp
+from routes.parking import parking_bp
+from routes.booking import booking_bp
+from routes.payment import payment_bp
+from routes.chat import chat_bp
+from routes.admin import admin_bp
+from routes.user import user_bp
+from routes.wallet import wallet_bp
+from routes.review import review_bp
+from routes.web import web_bp
+
+# Import database models
+from models.database import db
+
+def create_app(config_class=Config):
+    """Application factory pattern"""
+    app = Flask(__name__)
+    app.config.from_object(config_class)
+    
+    # Enable CORS with proper configuration
+    CORS(app, resources={
+        r"/api/*": {
+            "origins": "*",
+            "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization"],
+            "expose_headers": ["Content-Type", "Authorization"],
+            "supports_credentials": False
+        }
+    })
+    
+    # Initialize JWT
+    jwt = JWTManager(app)
+    
+    # Initialize MongoDB with better error handling
+    try:
+        client = MongoClient(
+            app.config['MONGO_URI'],
+            serverSelectionTimeoutMS=5000,  # 5 second timeout
+            connectTimeoutMS=10000,
+            socketTimeoutMS=10000
+        )
+        # Test the connection
+        client.admin.command('ping')
+        app.db = client.get_database()
+        print("✅ MongoDB connection successful!")
+    except Exception as e:
+        print(f"⚠️  MongoDB connection failed: {e}")
+        print("App will start but database operations will fail.")
+        print("Please check your MONGO_URI in .env file")
+        # Create a dummy db object to prevent immediate crash
+        app.db = None
+    
+    # Initialize database helper
+    try:
+        if hasattr(app, 'db') and app.db is not None:
+            db.init_app(app)
+    except Exception as e:
+        print(f"⚠️  Database initialization warning: {e}")
+    
+    print("✅ Images stored as base64 in MongoDB (no local files needed)")
+    
+    # Register blueprints
+    app.register_blueprint(web_bp)  # Web pages (no prefix)
+    app.register_blueprint(auth_bp, url_prefix='/api/auth')
+    app.register_blueprint(parking_bp, url_prefix='/api/parking')
+    app.register_blueprint(booking_bp, url_prefix='/api/booking')
+    app.register_blueprint(payment_bp, url_prefix='/api/payment')
+    app.register_blueprint(chat_bp, url_prefix='/api/chat')
+    app.register_blueprint(admin_bp, url_prefix='/api/admin')
+    app.register_blueprint(user_bp, url_prefix='/api/user')
+    app.register_blueprint(wallet_bp, url_prefix='/api/wallet')
+    app.register_blueprint(review_bp, url_prefix='/api/review')
+    
+    # Health check endpoint
+    @app.route('/health')
+    def health_check():
+        return jsonify({
+            'status': 'healthy',
+            'timestamp': datetime.utcnow().isoformat(),
+            'service': 'Smart City Parking API'
+        }), 200
+    
+    # Root API endpoint
+    @app.route('/api')
+    def api_index():
+        return jsonify({
+            'message': 'Smart City Parking API',
+            'version': '1.0.0',
+            'endpoints': {
+                'auth': '/api/auth',
+                'parking': '/api/parking',
+                'booking': '/api/booking',
+                'payment': '/api/payment',
+                'chat': '/api/chat',
+                'admin': '/api/admin',
+                'user': '/api/user',
+                'wallet': '/api/wallet'
+            }
+        }), 200
+    
+    # Error handlers
+    @app.errorhandler(404)
+    def not_found(error):
+        return jsonify({'error': 'Resource not found'}), 404
+    
+    @app.errorhandler(500)
+    def internal_error(error):
+        return jsonify({'error': 'Internal server error'}), 500
+    
+    return app
+
+app = create_app()
+
+if __name__ == '__main__':
+    app = create_app()
+    app.run(host='0.0.0.0', port=5000, debug=True)
